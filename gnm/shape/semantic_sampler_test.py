@@ -125,6 +125,95 @@ class SamplerTest(absltest.TestCase):
 
     np.testing.assert_array_equal(ident1, ident2)
 
+  def test_outputs_are_numpy_float32(self):
+    """Tests that all sampling methods return float32 numpy arrays."""
+    rng = np.random.default_rng(0)
+    outputs = (
+        self.expression_sampler.sample_expression(
+            semantic_sampler.Expression.HAPPY, num_samples=2, rng=rng
+        ),
+        self.expression_sampler.blend_expressions(
+            {
+                semantic_sampler.Expression.SURPRISE: 0.5,
+                semantic_sampler.Expression.HAPPY: 0.5,
+            },
+            rng=rng,
+        ),
+        self.identity_sampler.sample_identity(
+            semantic_sampler.Gender.FEMALE,
+            semantic_sampler.Ethnicity.ASIAN,
+            num_samples=2,
+            rng=rng,
+        ),
+        self.identity_sampler.blend_identities(
+            {semantic_sampler.Gender.FEMALE: 1.0},
+            {semantic_sampler.Ethnicity.WHITE: 1.0},
+            num_samples=2,
+            rng=rng,
+        ),
+    )
+    for output in outputs:
+      self.assertIsInstance(output, np.ndarray)
+      self.assertEqual(output.dtype, np.float32)
+
+  def test_sample_expression_matches_model_predict(self):
+    """Tests that direct-call inference matches Model.predict values."""
+    seed = 123
+    num_samples = 4
+    class_label = semantic_sampler.Expression.SMILE_WIDE
+
+    generated = self.expression_sampler.sample_expression(
+        class_label, num_samples, rng=np.random.default_rng(seed)
+    )
+
+    # Rebuild the identical decoder inputs and run the Keras predict path.
+    num_classes = self.expression_sampler._num_classes
+    latent_dim = self.expression_sampler._latent_dim
+    class_one_hot = np.repeat(
+        np.eye(num_classes, dtype='float32')[[int(class_label)]],
+        num_samples,
+        axis=0,
+    )
+    z_sample = (
+        np.random.default_rng(seed)
+        .normal(size=(num_samples, latent_dim))
+        .astype('float32')
+    )
+    expected = self.expression_sampler._decoder.predict(
+        [z_sample, class_one_hot], verbose=0
+    )
+
+    np.testing.assert_allclose(generated, expected, rtol=1e-5, atol=1e-6)
+
+  def test_sample_identity_matches_model_predict(self):
+    """Tests that direct-call inference matches Model.predict values."""
+    seed = 456
+    num_samples = 3
+    gender = semantic_sampler.Gender.MALE
+    ethnicity = semantic_sampler.Ethnicity.BLACK
+
+    generated = self.identity_sampler.sample_identity(
+        gender, ethnicity, num_samples, rng=np.random.default_rng(seed)
+    )
+
+    # Rebuild the identical decoder inputs and run the Keras predict path.
+    combined_ohe = semantic_sampler._create_combined_one_hot_labels(
+        np.array([[gender, ethnicity]]),
+        self.identity_sampler._NUM_GENDER_CLASSES,
+        self.identity_sampler._NUM_ETHNICITIES_CLASSES,
+    )
+    labels_for_decoder = np.repeat(combined_ohe, num_samples, axis=0)
+    z_sample = (
+        np.random.default_rng(seed)
+        .normal(size=(num_samples, self.identity_sampler._LATENT_DIM))
+        .astype('float32')
+    )
+    expected = self.identity_sampler._decoder.predict(
+        [z_sample, labels_for_decoder], verbose=0
+    )
+
+    np.testing.assert_allclose(generated, expected, rtol=1e-5, atol=1e-6)
+
   def test_non_deterministic_sampling(self):
     """Tests that sampling without an explicit RNG is non-deterministic."""
     # Test ExpressionSampler

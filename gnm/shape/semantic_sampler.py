@@ -97,6 +97,29 @@ def _get_rng(rng: np.random.Generator | None) -> np.random.Generator:
   return rng if rng is not None else np.random.default_rng()
 
 
+def _decode(
+    decoder: tf.keras.Model,
+    latents: np.ndarray,
+    labels: np.ndarray,
+) -> np.ndarray:
+  """Decodes latent vectors with a direct model call.
+
+  Calling the model directly skips the `Model.predict` data-adapter and
+  predict-loop machinery, which dominates latency for the small batches
+  sampled here, while producing the same values as
+  `decoder.predict([latents, labels])`.
+
+  Args:
+    decoder: The conditional decoder model.
+    latents: Float32 latent vectors of shape (N, latent_dim).
+    labels: Float32 conditioning labels of shape (N, num_classes).
+
+  Returns:
+    Decoded vectors as a float32 numpy array of shape (N, output_dim).
+  """
+  return decoder([latents, labels], training=False).numpy()
+
+
 class ExpressionSampler:
   """Samples expressions and identities from a Conditional VAE."""
 
@@ -169,7 +192,7 @@ class ExpressionSampler:
         'float32'
     )
 
-    generated_vectors = self._decoder.predict([z_sample, class_one_hot])
+    generated_vectors = _decode(self._decoder, z_sample, class_one_hot)
     class_name = self._expression_names[class_label]
     if verbose:
       print(
@@ -230,8 +253,8 @@ class ExpressionSampler:
       blended_one_hot_label += class_one_hot * weight
 
     # Decode the blended latent vector and weighted average of one-hot labels
-    blended_expression = self._decoder.predict(
-        [blended_latent_vector, blended_one_hot_label]
+    blended_expression = _decode(
+        self._decoder, blended_latent_vector, blended_one_hot_label
     )
     if verbose:
       print(
@@ -397,9 +420,7 @@ class IdentitySampler:
         'float32'
     )
 
-    generated_vectors = self._decoder.predict(
-        [z_sample, labels_for_decoder], verbose=0
-    )
+    generated_vectors = _decode(self._decoder, z_sample, labels_for_decoder)
     gender_name = self._GENDER_LABEL_MAP.get(
         gender_class, f'Unknown Gender {gender_class}'
     )
@@ -500,9 +521,7 @@ class IdentitySampler:
         'float32'
     )
 
-    blended_identities = self._decoder.predict(
-        [z_sample, labels_for_decoder], verbose=0
-    )
+    blended_identities = _decode(self._decoder, z_sample, labels_for_decoder)
     if verbose:
       print(
           f'Generated {num_samples} blended identity vectors from gender'
