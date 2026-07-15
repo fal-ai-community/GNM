@@ -63,6 +63,8 @@ dev = [
 [tool.setuptools]
 packages = [
     "gnm.shape",
+    "gnm.shape.data",
+    "gnm.shape.data.versions",
     "gnm.shape.fitting_utils",
     "gnm.shape.visualization",
 ]
